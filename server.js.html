@@ -1,0 +1,90 @@
+const express = require('express');
+const http = require('http');
+const WebSocket = require('ws');
+
+const app = express();
+const server = http.createServer(app);
+const wss = new WebSocket.Server({ server });
+
+let gameStatus = {
+    timer: 10,
+    isBettingPhase: true,
+    result: null,
+    history: []
+};
+
+function generateGameResult() {
+    const dice1 = Math.floor(Math.random() * 6) + 1;
+    const dice2 = Math.floor(Math.random() * 6) + 1;
+    const dice3 = Math.floor(Math.random() * 6) + 1;
+    const total = dice1 + dice2 + dice3;
+    const result = total >= 11 ? 'tai' : 'xiu';
+    
+    // Logic to handle "bão" (3 of a kind)
+    if (dice1 === dice2 && dice2 === dice3) {
+        return { total, result: 'bao', dice: [dice1, dice2, dice3] };
+    }
+    
+    return { total, result, dice: [dice1, dice2, dice3] };
+}
+
+function startGameLoop() {
+    gameStatus.timer = 10;
+    gameStatus.isBettingPhase = true;
+    gameStatus.result = null;
+
+    const bettingInterval = setInterval(() => {
+        gameStatus.timer--;
+        if (gameStatus.timer <= 0) {
+            clearInterval(bettingInterval);
+            gameStatus.isBettingPhase = false;
+            gameStatus.result = generateGameResult();
+            
+            // Add result to history
+            gameStatus.history.push(gameStatus.result.result);
+            if (gameStatus.history.length > 10) {
+                gameStatus.history.shift();
+            }
+
+            // Gửi kết quả cho tất cả người chơi
+            wss.clients.forEach(client => {
+                if (client.readyState === WebSocket.OPEN) {
+                    client.send(JSON.stringify({ type: 'result', data: gameStatus.result, history: gameStatus.history }));
+                }
+            });
+
+            // Chờ 5 giây rồi bắt đầu ván mới
+            setTimeout(startGameLoop, 5000);
+        }
+    }, 1000);
+}
+
+// Bắt đầu vòng lặp game khi server khởi động
+startGameLoop();
+
+// WebSocket connection handler
+wss.on('connection', ws => {
+    console.log('Client connected');
+    // Gửi trạng thái game hiện tại cho người chơi mới
+    ws.send(JSON.stringify({ type: 'status', data: gameStatus }));
+    
+    ws.on('message', message => {
+        // Xử lý các yêu cầu đặt cược từ người chơi
+        const data = JSON.parse(message);
+        if (data.type === 'bet') {
+            // Logic xử lý cược và cập nhật số dư
+            // ...
+        }
+    });
+
+    ws.on('close', () => {
+        console.log('Client disconnected');
+    });
+});
+
+// Phục vụ file HTML
+app.use(express.static('public')); // Giả sử file index.html nằm trong thư mục 'public'
+
+server.listen(3000, () => {
+    console.log('Server is running on port 3000');
+});
